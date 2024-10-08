@@ -22,6 +22,23 @@ pub use tracing;
 /// * `DS_OPENTELEMETRY_USERNAME` - The username to use for basic authentication.
 /// * `DS_OPENTELEMETRY_PASSWORD` - The password to use for basic authentication.
 pub fn setup(default_logging_level: LevelFilter, app_name: &'static str) {
+    setup_traces(default_logging_level, app_name);
+    setup_metrics(app_name);
+}
+
+/// Register with the configured OTEL collector and setup sending traces to it.
+///
+/// # Arguments
+///
+/// * `default_logging_level` - The default logging level to use.
+/// * `app_name` - The name of the application (forwarded to the OTEL collector).
+///
+/// # Environment Variables
+///
+/// * `OTEL_EXPORTER_OTLP_ENDPOINT` - URL of the OTEL collector (base URL, i.e. no `/v1/traces`).
+/// * `DS_OPENTELEMETRY_USERNAME` - The username to use for basic authentication.
+/// * `DS_OPENTELEMETRY_PASSWORD` - The password to use for basic authentication.
+pub fn setup_traces(default_logging_level: LevelFilter, app_name: &'static str) {
     let env_filter = EnvFilter::builder()
         .with_default_directive(default_logging_level.into())
         .from_env_lossy();
@@ -31,7 +48,62 @@ pub fn setup(default_logging_level: LevelFilter, app_name: &'static str) {
         .with(env_filter)
         .with(fmt_layer);
 
-    if let Ok(tracing_url) = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT") {
+    if let Some(exporter) = build_exporter() {
+        let provider = opentelemetry_otlp::new_pipeline()
+            .tracing()
+            .with_exporter(exporter)
+            .install_batch(opentelemetry_sdk::runtime::Tokio)
+            .unwrap();
+
+        opentelemetry::global::set_tracer_provider(provider.clone());
+        let tracer = provider.tracer(app_name);
+        let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+
+        tracing::subscriber::set_global_default(registry.with(telemetry_layer)).unwrap();
+        tracing::info!("OTEL exporter configured for traces");
+    } else {
+        tracing::subscriber::set_global_default(registry).unwrap();
+        tracing::warn!("No OTEL exporter configured for traces");
+    }
+}
+
+
+/// Register with the configured OTEL collector and setup sending metrics to it.
+///
+/// # Arguments
+///
+/// * `app_name` - The name of the application (forwarded to the OTEL collector).
+///
+/// # Environment Variables
+///
+/// * `OTEL_EXPORTER_OTLP_ENDPOINT` - URL of the OTEL collector (base URL, i.e. no `/v1/traces`).
+/// * `DS_OPENTELEMETRY_USERNAME` - The username to use for basic authentication.
+/// * `DS_OPENTELEMETRY_PASSWORD` - The password to use for basic authentication.
+pub fn setup_metrics(app_name: &'static str) {
+    if let  Some(exporter) = build_exporter() {
+        let metrics = opentelemetry_otlp::new_pipeline()
+        .metrics(opentelemetry_sdk::runtime::Tokio)
+        .with_exporter(exporter)
+        .with_resource(
+            opentelemetry_sdk::Resource::new(vec![
+                opentelemetry::KeyValue::new(
+                    "service.name".to_string(),
+                   app_name 
+                ),
+            ])
+        )
+        .build().unwrap();
+
+        opentelemetry::global::set_meter_provider(metrics);
+        tracing::info!("OTEL exporter configured for metrics");
+    } else {
+        tracing::warn!("No OTEL exporter configured for metrics");
+    }
+}
+
+
+fn build_exporter() -> Option<opentelemetry_otlp::HttpExporterBuilder> {
+     if let Ok(tracing_url) = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT") {
         let username = std::env::var("DS_OPENTELEMETRY_USERNAME");
         let password = std::env::var("DS_OPENTELEMETRY_PASSWORD");
         let timeout = std::time::Duration::from_secs(5);
@@ -48,24 +120,13 @@ pub fn setup(default_logging_level: LevelFilter, app_name: &'static str) {
         } else {
             HyperClient::new_with_timeout(hyper_client, timeout)
         };
+            Some(opentelemetry_otlp::new_exporter()
+                .http()
+                .with_http_client(oltp_http_client)
+                .with_endpoint(tracing_url))
+     } else {
+        None
+     }
 
-        let provider = opentelemetry_otlp::new_pipeline()
-            .tracing()
-            .with_exporter(
-                opentelemetry_otlp::new_exporter()
-                    .http()
-                    .with_http_client(oltp_http_client)
-                    .with_endpoint(tracing_url),
-            )
-            .install_batch(opentelemetry_sdk::runtime::Tokio)
-            .unwrap();
-
-        opentelemetry::global::set_tracer_provider(provider.clone());
-        let tracer = provider.tracer(app_name);
-        let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-
-        tracing::subscriber::set_global_default(registry.with(telemetry_layer)).unwrap();
-    } else {
-        tracing::subscriber::set_global_default(registry).unwrap();
-    }
+   
 }
