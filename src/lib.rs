@@ -6,6 +6,9 @@ use opentelemetry_otlp::WithExportConfig;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
+pub use opentelemetry;
+pub use tracing;
+
 /// Register with the configured OTEL collector and setup sending metrics and traces to it.
 ///
 /// # Arguments
