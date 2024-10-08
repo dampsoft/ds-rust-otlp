@@ -87,7 +87,7 @@ pub fn setup_metrics(app_name: &'static str) {
         .with_resource(
             opentelemetry_sdk::Resource::new(vec![
                 opentelemetry::KeyValue::new(
-                    "service.name".to_string(),
+                    "service_name".to_string(),
                    app_name 
                 ),
             ])
