@@ -69,7 +69,7 @@ pub fn setup_traces(setup_configuration: &SetupConfiguration) {
         .with(env_filter)
         .with(fmt_layer);
 
-    if let Some(exporter) = build_exporter() {
+    if let Some(exporter) = build_exporter(setup_configuration) {
         let provider = opentelemetry_otlp::new_pipeline()
             .tracing()
             .with_exporter(exporter)
