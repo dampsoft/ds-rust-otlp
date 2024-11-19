@@ -3,6 +3,7 @@ use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use opentelemetry::trace::TracerProvider;
 use opentelemetry_http::hyper::HyperClient;
 use opentelemetry_otlp::WithExportConfig;
+use std::collections::HashMap;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
@@ -104,12 +105,9 @@ pub fn setup_metrics(setup_configuration: &SetupConfiguration) {
         let metrics = opentelemetry_otlp::new_pipeline()
             .metrics(opentelemetry_sdk::runtime::Tokio)
             .with_exporter(exporter)
-            .with_resource(opentelemetry_sdk::Resource::new(vec![
-                opentelemetry::KeyValue::new(
-                    "service_name".to_string(),
-                    setup_configuration.app_name,
-                ),
-            ]))
+            .with_resource(opentelemetry_sdk::Resource::new(get_otel_resources(
+                setup_configuration.app_name,
+            )))
             .build()
             .unwrap();
 
@@ -118,6 +116,32 @@ pub fn setup_metrics(setup_configuration: &SetupConfiguration) {
     } else {
         tracing::warn!("No OTEL exporter configured for metrics");
     }
+}
+
+fn get_otel_headers() -> HashMap<String, String> {
+    let mut headers_map = std::collections::HashMap::new();
+
+    if let Ok(tenant_id) = std::env::var("DS_OPENTELEMETRY_TENANT_ID") {
+        headers_map.insert("x-scope-orgid".to_string(), tenant_id);
+    }
+
+    headers_map
+}
+
+fn get_otel_resources(app_name: &'static str) -> Vec<opentelemetry::KeyValue> {
+    let mut resources = vec![opentelemetry::KeyValue::new(
+        "service_name".to_string(),
+        app_name,
+    )];
+
+    if let Ok(update_channel) = std::env::var("DS_UPDATE_CHANNEL") {
+        resources.push(opentelemetry::KeyValue::new(
+            "update_channel".to_string(),
+            update_channel,
+        ));
+    }
+
+    resources
 }
 
 fn build_exporter(
@@ -143,7 +167,8 @@ fn build_exporter(
         let mut exporter = opentelemetry_otlp::new_exporter()
             .http()
             .with_http_client(oltp_http_client)
-            .with_endpoint(tracing_url);
+            .with_endpoint(tracing_url)
+            .with_headers(get_otel_headers());
 
         if let Some(timeout) = setup_configuration.exporter_timeout {
             exporter = exporter.with_timeout(timeout);
