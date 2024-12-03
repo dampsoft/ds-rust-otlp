@@ -136,7 +136,7 @@ fn get_otel_resources(app_name: &'static str) -> Vec<opentelemetry::KeyValue> {
 
     if let Ok(update_channel) = std::env::var("DS_UPDATE_CHANNEL") {
         resources.push(opentelemetry::KeyValue::new(
-            "update_channel".to_string(),
+            "ds_update_channel".to_string(),
             update_channel,
         ));
     }
